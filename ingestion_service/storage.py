@@ -86,8 +86,9 @@ qdrant_client = QdrantClient(
 def _collection_exists(name: str) -> bool:
     # Check collection existence using QDRANT_URL
     url = f"{config.QDRANT_URL}/collections/{name}"
+    headers = {"api-key": config.QDRANT_API_KEY} if config.QDRANT_API_KEY else {}
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             return True
         if response.status_code == 404:
