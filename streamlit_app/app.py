@@ -33,20 +33,25 @@ except Exception:
     st.title("🔍 Document Search")
 
 # Authentication
+# Authentication
 APP_ACCESS_KEY = os.getenv("APP_ACCESS_KEY", "").strip()
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
-if APP_ACCESS_KEY and not st.session_state.authenticated:
-    st.title("🔐 Login")
-    access_key = st.text_input("Enter Access Key", type="password")
-    if st.button("Login"):
+@st.dialog("🔐 Login Required")
+def login_dialog():
+    st.write("Please enter the access key to continue.")
+    access_key = st.text_input("Access Key", type="password")
+    if st.button("Login", type="primary", use_container_width=True):
         if access_key == APP_ACCESS_KEY:
             st.session_state.authenticated = True
             st.rerun()
         else:
             st.error("Invalid Access Key")
+
+if APP_ACCESS_KEY and not st.session_state.authenticated:
+    login_dialog()
     st.stop()
 
 st.markdown("Search through accounting documents using semantic search powered by vector embeddings.")
