@@ -84,7 +84,8 @@ qdrant_client = QdrantClient(
 
 
 def _collection_exists(name: str) -> bool:
-    url = f"http://{config.QDRANT_HOST}:{config.QDRANT_PORT}/collections/{name}"
+    # Check collection existence using QDRANT_URL
+    url = f"{config.QDRANT_URL}/collections/{name}"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
