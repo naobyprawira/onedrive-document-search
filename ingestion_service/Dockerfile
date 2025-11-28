@@ -11,6 +11,7 @@ RUN apt-get update && \
     build-essential \
     libpq-dev \
     gcc \
+    p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency specification first to leverage Docker cache

@@ -79,7 +79,8 @@ if not config.QDRANT_URL:
 logger.info("Connecting to Qdrant Cloud at %s", config.QDRANT_URL)
 qdrant_client = QdrantClient(
     url=config.QDRANT_URL,
-    api_key=config.QDRANT_API_KEY or None
+    api_key=config.QDRANT_API_KEY or None,
+    timeout=60  # Increase timeout to 60 seconds
 )
 
 

@@ -32,6 +32,23 @@ except Exception:
     logger.warning("Logo file 'logo.png' not found.")
     st.title("🔍 Document Search")
 
+# Authentication
+APP_ACCESS_KEY = os.getenv("APP_ACCESS_KEY", "").strip()
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if APP_ACCESS_KEY and not st.session_state.authenticated:
+    st.title("🔐 Login")
+    access_key = st.text_input("Enter Access Key", type="password")
+    if st.button("Login"):
+        if access_key == APP_ACCESS_KEY:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Invalid Access Key")
+    st.stop()
+
 st.markdown("Search through accounting documents using semantic search powered by vector embeddings.")
 
 # Defaults

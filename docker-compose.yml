@@ -68,6 +68,8 @@ services:
     environment:
       # URL of the search service
       SEARCH_API_URL: http://search-service:8000/search
+      # Optional: Access key for the app
+      APP_ACCESS_KEY: ${APP_ACCESS_KEY}
     volumes:
       - ./logs:/app/logs
     networks:
