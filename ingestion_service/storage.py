@@ -110,31 +110,45 @@ def ensure_collections() -> None:
             config.DOC_COLLECTION,
             {config.DOC_VECTOR_NAME: VectorParams(size=config.EMBED_DIM, distance=Distance.COSINE)},
             {BM25_VECTOR_NAME: SparseVectorParams(index=SparseIndexParams(on_disk=False))},
+            "fileId"
         ),
         (
             config.CHUNK_COLLECTION,
             {config.CHUNK_VECTOR_NAME: VectorParams(size=config.EMBED_DIM, distance=Distance.COSINE)},
             {BM25_VECTOR_NAME: SparseVectorParams(index=SparseIndexParams(on_disk=False))},
+            "docId"
         ),
     ]
 
-    for name, vectors, sparse_vectors in collections:
-        if _collection_exists(name):
+    for name, vectors, sparse_vectors, index_field in collections:
+        if not _collection_exists(name):
+            logger.info("Creating Qdrant collection %s", name)
+            try:
+                qdrant_client.create_collection(
+                    collection_name=name,
+                    vectors_config=vectors,
+                    sparse_vectors_config=sparse_vectors,
+                )
+            except UnexpectedResponse as exc:
+                message = str(exc)
+                if "already exists" in message or "409" in message:
+                    logger.info("Collection %s already existed (409).", name)
+                else:
+                    raise
+        else:
             logger.debug("Qdrant collection %s already exists.", name)
-            continue
-        logger.info("Creating Qdrant collection %s.", name)
+        
+        # Ensure payload index exists (required for filtering/deleting by ID)
         try:
-            qdrant_client.create_collection(
+            qdrant_client.create_payload_index(
                 collection_name=name,
-                vectors_config=vectors,
-                sparse_vectors_config=sparse_vectors,
+                field_name=index_field,
+                field_schema="keyword"
             )
-        except UnexpectedResponse as exc:
-            message = str(exc)
-            if "already exists" in message or "409" in message:
-                logger.info("Collection %s already existed (409).", name)
-            else:
-                raise
+            logger.info("Ensured payload index on %s.%s", name, index_field)
+        except Exception as exc:
+            # Ignore if index already exists or other non-critical errors
+            logger.debug("Payload index creation on %s.%s: %s", name, index_field, exc)
 
 
 def get_local_inventory() -> Dict[str, dict]:
