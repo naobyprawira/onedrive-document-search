@@ -7,6 +7,7 @@ from pathlib import Path
 # Qdrant configuration
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_URL = os.getenv("QDRANT_URL", "").strip()
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
 DOC_COLLECTION = os.getenv("DOC_COLLECTION", "documents_v2")
 CHUNK_COLLECTION = os.getenv("CHUNK_COLLECTION", "chunks_v2")

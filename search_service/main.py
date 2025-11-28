@@ -39,6 +39,7 @@ EMBED_DIM = int(os.getenv("EMBED_DIM", "3072"))
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_URL = os.getenv("QDRANT_URL", "").strip()
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
@@ -54,11 +55,19 @@ logging.basicConfig(
     ]
 )
 
-qdrant_client = QdrantClient(
-    host=QDRANT_HOST, 
-    port=QDRANT_PORT,
-    api_key=QDRANT_API_KEY or None
-)
+if QDRANT_URL:
+    logger.info("Connecting to Qdrant Cloud at %s", QDRANT_URL)
+    qdrant_client = QdrantClient(
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY or None
+    )
+else:
+    logger.info("Connecting to Qdrant at %s:%s", QDRANT_HOST, QDRANT_PORT)
+    qdrant_client = QdrantClient(
+        host=QDRANT_HOST, 
+        port=QDRANT_PORT,
+        api_key=QDRANT_API_KEY or None
+    )
 app = FastAPI(title="Search Service", version="2.0.0")
 
 @app.on_event("startup")

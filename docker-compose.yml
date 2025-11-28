@@ -11,6 +11,7 @@ services:
       # Hostname/IP and port of the Qdrant instance
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      QDRANT_URL: ${QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       # API key for Google Gemini models used for summarisation and embedding
       GEMINI_API_KEY: ${GEMINI_API_KEY}
@@ -53,6 +54,7 @@ services:
       # Hostname/IP and port of the Qdrant instance
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      QDRANT_URL: ${QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       # API key for Google Gemini model used to embed incoming queries
       GEMINI_API_KEY: ${GEMINI_API_KEY}

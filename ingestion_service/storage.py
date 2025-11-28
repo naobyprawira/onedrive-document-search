@@ -72,11 +72,20 @@ def generate_bm25_vector(text: str) -> Dict:
         logger.warning(f"Failed to generate BM25 vector: {exc}")
         return {"indices": [], "values": []}
 
-qdrant_client = QdrantClient(
-    host=config.QDRANT_HOST, 
-    port=config.QDRANT_PORT,
-    api_key=config.QDRANT_API_KEY or None
-)
+# Initialize Qdrant client
+if config.QDRANT_URL:
+    logger.info("Connecting to Qdrant Cloud at %s", config.QDRANT_URL)
+    qdrant_client = QdrantClient(
+        url=config.QDRANT_URL,
+        api_key=config.QDRANT_API_KEY or None
+    )
+else:
+    logger.info("Connecting to Qdrant at %s:%s", config.QDRANT_HOST, config.QDRANT_PORT)
+    qdrant_client = QdrantClient(
+        host=config.QDRANT_HOST, 
+        port=config.QDRANT_PORT,
+        api_key=config.QDRANT_API_KEY or None
+    )
 
 
 def _collection_exists(name: str) -> bool:
