@@ -12,6 +12,22 @@ from google.genai import types as genai_types
 from fastapi import FastAPI, HTTPException, Query
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
+
+# Workaround for tqdm 'no attribute _lock' issue in fastembed
+import tqdm
+import tqdm.auto
+from threading import Lock
+
+def _patch_tqdm(t):
+    if not hasattr(t, '_lock'):
+        try:
+            t._lock = Lock()
+        except (TypeError, AttributeError):
+            pass
+
+_patch_tqdm(tqdm.tqdm)
+_patch_tqdm(tqdm.auto.tqdm)
+
 from fastembed import SparseTextEmbedding
 
 DOC_COLLECTION = os.getenv("DOC_COLLECTION", "documents_v2")
@@ -23,14 +39,31 @@ EMBED_DIM = int(os.getenv("EMBED_DIM", "3072"))
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
 
 logger = logging.getLogger("search")
-logging.basicConfig(level=logging.INFO)
+# Configure logging to file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("/app/logs/search.log")
+    ]
+)
 
-qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+qdrant_client = QdrantClient(
+    host=QDRANT_HOST, 
+    port=QDRANT_PORT,
+    api_key=QDRANT_API_KEY or None
+)
 app = FastAPI(title="Search Service", version="2.0.0")
+
+@app.on_event("startup")
+async def startup_event():
+    os.makedirs("/app/logs", exist_ok=True)
 
 _client: genai.Client | None = None
 _bm25_model: SparseTextEmbedding | None = None
@@ -116,10 +149,10 @@ def search(
     """
     Hybrid search (dense + sparse):
     1. Generate both semantic (dense) and BM25 (sparse) vectors for query
-    2. Search chunks collection with hybrid query
-    3. Group by document to find unique documents
-    4. Retrieve document metadata for each unique document
-    5. Return top K results with document info + best chunk snippet
+    2. Search chunks collection with hybrid query (for documents with chunks)
+    3. Search documents collection directly (catches metadata-only docs with 0 chunks)
+    4. Merge and deduplicate results
+    5. Return top K results with document info + best chunk snippet (if available)
     """
     try:
         # Generate dense vector (semantic)
@@ -154,18 +187,62 @@ def search(
         )
         chunk_results = response.points if hasattr(response, 'points') else response
     except Exception as exc:
-        logger.error(f"Hybrid search failed: {exc}")
+        logger.error(f"Hybrid search on chunks failed: {exc}")
         # Fallback to dense-only search
-        chunk_results = qdrant_client.search(
-            collection_name=CHUNK_COLLECTION,
-            query_vector=(CHUNK_VECTOR_NAME, query_vector),
-            limit=chunk_candidates,
-        )
+        try:
+            chunk_results = qdrant_client.search(
+                collection_name=CHUNK_COLLECTION,
+                query_vector=(CHUNK_VECTOR_NAME, query_vector),
+                limit=chunk_candidates,
+            )
+        except Exception:
+            chunk_results = []
     
-    if not chunk_results:
+    # Step 2: Also search documents collection directly (for metadata-only docs)
+    doc_direct_results = []
+    try:
+        response = qdrant_client.query_points(
+            collection_name=DOC_COLLECTION,
+            prefetch=[
+                qmodels.Prefetch(
+                    query=qmodels.SparseVector(
+                        indices=bm25_vector["indices"],
+                        values=bm25_vector["values"],
+                    ),
+                    using=BM25_VECTOR_NAME,
+                    limit=top_k * 2,  # Get more candidates
+                ),
+                qmodels.Prefetch(
+                    query=query_vector,
+                    using=DOC_VECTOR_NAME,
+                    limit=top_k * 2,
+                ),
+            ],
+            query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
+            limit=top_k * 2,
+        )
+        doc_direct_results = response.points if hasattr(response, 'points') else response
+    except Exception as exc:
+        logger.error(f"Hybrid search on documents failed: {exc}")
+        # Fallback to dense-only search
+        try:
+            doc_direct_results = qdrant_client.search(
+                collection_name=DOC_COLLECTION,
+                query_vector=(DOC_VECTOR_NAME, query_vector),
+                limit=top_k * 2,
+            )
+        except Exception:
+            doc_direct_results = []
+    
+    # If both searches failed, return empty
+    if not chunk_results and not doc_direct_results:
         return {"results": []}
 
-    # Step 2: Group chunks by docId and keep only the best chunk per document
+    # If both searches failed, return empty
+    if not chunk_results and not doc_direct_results:
+        return {"results": []}
+
+    # Step 3: Group chunks by docId and keep only the best chunk per document
     doc_best_chunks: Dict[str, Dict] = {}  # docId -> {chunk_info, score}
     
     for chunk in chunk_results:
@@ -184,53 +261,85 @@ def search(
                 "snippet": snippet[:512] + ("..." if len(snippet) > 512 else ""),
                 "score": chunk.score,
                 "fileName": chunk_payload.get("fileName"),
+                "source": "chunk",
             }
     
-    # Step 3: Retrieve document metadata for each unique document
-    if not doc_best_chunks:
-        return {"results": []}
-    
-    # Build filter to get all documents at once
-    doc_ids = list(doc_best_chunks.keys())
-    
-    # Retrieve documents by filtering on fileId
-    doc_points, _ = qdrant_client.scroll(
-        collection_name=DOC_COLLECTION,
-        scroll_filter=qmodels.Filter(
-            should=[
-                qmodels.FieldCondition(
-                    key="fileId",
-                    match=qmodels.MatchValue(value=doc_id),
-                )
-                for doc_id in doc_ids
-            ]
-        ),
-        limit=len(doc_ids),
-        with_payload=True,
-        with_vectors=False,
-    )
-    
-    # Step 4: Combine document metadata with chunk info
-    results: List[Dict] = []
-    
-    for doc_point in doc_points:
-        doc_payload = doc_point.payload or {}
+    # Step 4: Add documents found directly (with score adjustment to keep competitive)
+    for doc in doc_direct_results:
+        doc_payload = doc.payload or {}
         file_id = doc_payload.get("fileId")
         
-        if file_id not in doc_best_chunks:
+        if not file_id:
             continue
         
-        chunk_info = doc_best_chunks[file_id]
+        # If we already have this doc from chunks, keep the chunk version (better snippet)
+        # But if chunk score is significantly lower, use doc score
+        if file_id in doc_best_chunks:
+            # If direct doc search scored much higher, update the score
+            if doc.score > doc_best_chunks[file_id]["score"] * 1.2:
+                doc_best_chunks[file_id]["score"] = doc.score
+        else:
+            # New document found only in direct search (likely metadata-only)
+            doc_best_chunks[file_id] = {
+                "docId": file_id,
+                "chunkNo": None,
+                "snippet": doc_payload.get("summary", "")[:512],  # Use summary as snippet
+                "score": doc.score,
+                "fileName": doc_payload.get("fileName"),
+                "source": "document",
+                # Include doc payload directly to avoid another query
+                "drivePath": doc_payload.get("drivePath"),
+                "summary": doc_payload.get("summary"),
+                "webUrl": doc_payload.get("webUrl"),
+            }
+    
+    # Step 5: For documents found via chunks, retrieve full document metadata
+    chunk_source_docs = {doc_id: info for doc_id, info in doc_best_chunks.items() if info.get("source") == "chunk"}
+    
+    if chunk_source_docs:
+        doc_ids = list(chunk_source_docs.keys())
         
+        # Retrieve documents by filtering on fileId
+        doc_points, _ = qdrant_client.scroll(
+            collection_name=DOC_COLLECTION,
+            scroll_filter=qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="fileId",
+                        match=qmodels.MatchAny(any=doc_ids),
+                    )
+                ]
+            ),
+            limit=len(doc_ids),
+            with_payload=True,
+            with_vectors=False,
+        )
+        
+        # Update chunk results with full document metadata
+        for doc_point in doc_points:
+            doc_payload = doc_point.payload or {}
+            file_id = doc_payload.get("fileId")
+            
+            if file_id in chunk_source_docs:
+                doc_best_chunks[file_id].update({
+                    "drivePath": doc_payload.get("drivePath"),
+                    "summary": doc_payload.get("summary"),
+                    "webUrl": doc_payload.get("webUrl"),
+                })
+    
+    # Step 6: Build final results list
+    results: List[Dict] = []
+    
+    for file_id, info in doc_best_chunks.items():
         results.append({
             "fileId": file_id,
-            "fileName": doc_payload.get("fileName"),
-            "drivePath": doc_payload.get("drivePath"),
-            "summary": doc_payload.get("summary"),
-            "webUrl": doc_payload.get("webUrl"),
-            "chunkNo": chunk_info["chunkNo"],
-            "snippet": chunk_info["snippet"],
-            "score": chunk_info["score"],
+            "fileName": info.get("fileName"),
+            "drivePath": info.get("drivePath"),
+            "summary": info.get("summary"),
+            "webUrl": info.get("webUrl"),
+            "chunkNo": info.get("chunkNo"),
+            "snippet": info.get("snippet"),
+            "score": info["score"],
         })
     
     # Sort by score (highest first) and return top K

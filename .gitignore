@@ -4,36 +4,44 @@ __pycache__/
 *$py.class
 *.so
 .Python
-.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.env
+.venv
+env/
 venv/
 ENV/
-env/
-*.egg-info/
-dist/
-build/
-
-# Environment variables
-.env
-.2venv/
-.env.local
+env.bak/
+venv.bak/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
-*~
+
+# Project
+temp/
+logs/
+data/
+qdrant_data/
 
 # OS
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Logs
-*.log
-
-# Temporary files and scripts
-temp/
-
-# Docker
-.dockerignore

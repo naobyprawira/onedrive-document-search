@@ -41,3 +41,12 @@ def text_sha256(value: str) -> str:
 def bytes_sha256(data: bytes) -> str:
     """Return hex encoded SHA256 for raw bytes."""
     return hashlib.sha256(data).hexdigest()
+
+
+def file_sha256(file_path: str) -> str:
+    """Return hex encoded SHA256 for a file, reading in chunks."""
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()

@@ -16,6 +16,21 @@ from qdrant_client.models import (
     SparseVectorParams,
     SparseIndexParams,
 )
+# Workaround for tqdm 'no attribute _lock' issue in fastembed
+import tqdm
+import tqdm.auto
+from threading import Lock
+
+def _patch_tqdm(t):
+    if not hasattr(t, '_lock'):
+        try:
+            t._lock = Lock()
+        except (TypeError, AttributeError):
+            pass
+
+_patch_tqdm(tqdm.tqdm)
+_patch_tqdm(tqdm.auto.tqdm)
+
 from fastembed import SparseTextEmbedding
 
 import config
@@ -57,7 +72,11 @@ def generate_bm25_vector(text: str) -> Dict:
         logger.warning(f"Failed to generate BM25 vector: {exc}")
         return {"indices": [], "values": []}
 
-qdrant_client = QdrantClient(host=config.QDRANT_HOST, port=config.QDRANT_PORT)
+qdrant_client = QdrantClient(
+    host=config.QDRANT_HOST, 
+    port=config.QDRANT_PORT,
+    api_key=config.QDRANT_API_KEY or None
+)
 
 
 def _collection_exists(name: str) -> bool:
@@ -195,12 +214,18 @@ def replace_document(
             wait=True,
         )
 
-    # Generate BM25 vector for document (fileName + summary)
+    # Generate BM25 vector for document
+    # Use bm25SearchText if available (for metadata-only docs), otherwise fileName + summary
     doc_text_parts = []
-    if doc_payload.get("fileName"):
-        doc_text_parts.append(doc_payload["fileName"])
-    if doc_payload.get("summary"):
-        doc_text_parts.append(doc_payload["summary"])
+    if doc_payload.get("bm25SearchText"):
+        # Metadata-only documents have pre-built search text (filename + path)
+        doc_text_parts.append(doc_payload["bm25SearchText"])
+    else:
+        # Regular documents use fileName + summary
+        if doc_payload.get("fileName"):
+            doc_text_parts.append(doc_payload["fileName"])
+        if doc_payload.get("summary"):
+            doc_text_parts.append(doc_payload["summary"])
     doc_bm25_vector = generate_bm25_vector(" ".join(doc_text_parts))
 
     doc_point = PointStruct(

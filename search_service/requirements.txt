@@ -4,3 +4,4 @@ qdrant-client
 google-genai
 python-dotenv
 fastembed
+tqdm

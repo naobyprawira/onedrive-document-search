@@ -1,33 +1,17 @@
-# This compose file defines a four‑service stack:
-# - qdrant: persistent vector database for storing document and chunk embeddings.
-# - ingestion-service: FastAPI application that polls OneDrive, extracts text,
-#   summarises and embeds documents, chunks them and upserts everything into Qdrant.
-# - search-service: FastAPI application exposing a /search endpoint. It embeds
-#   user queries, performs hierarchical search (doc-level then chunk-level),
-#   and returns document summaries and snippet-level results.
-# - streamlit-app: Web UI for searching documents with a user-friendly interface.
+version: '3.8'
 
 services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      # Adjust Qdrant configuration here if needed. Defaults are usually fine.
-      QDRANT_LOG_LEVEL: "INFO"
-
   ingestion-service:
     build: ./ingestion_service
     container_name: ingestion-service
     restart: unless-stopped
+    ports:
+      - "8011:8000"
     environment:
       # Hostname/IP and port of the Qdrant instance
       QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
       # API key for Google Gemini models used for summarisation and embedding
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       EMBED_DIM: ${EMBED_DIM:-3072}
@@ -36,16 +20,14 @@ services:
       # OpenRouter API key (required if SUMMARY_PROVIDER=OPENROUTER)
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
-      # Azure AD credentials for Microsoft Graph. The ingestion service will
-      # request an access token automatically when syncing OneDrive. Ensure
-      # these are set in your .env file.
+      # Azure AD credentials for Microsoft Graph.
       MS_TENANT_ID: ${MS_TENANT_ID}
       MS_CLIENT_ID: ${MS_CLIENT_ID}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
       # Optionally restrict to a specific drive/folder
       ONEDRIVE_DRIVE_ID: ${ONEDRIVE_DRIVE_ID}
       ONEDRIVE_ROOT_PATH: ${ONEDRIVE_ROOT_PATH}
-      # CRON expression for how often to sync OneDrive (default: daily at midnight)
+      # CRON expression for how often to sync OneDrive
       SCHEDULE_CRON: ${SCHEDULE_CRON}
       # OCR service endpoint for PDF text extraction
       OCR_SERVICE_URL: ${OCR_SERVICE_URL}
@@ -56,25 +38,28 @@ services:
       DRY_RUN: ${DRY_RUN:-false}
       SKIP_SUMMARY: ${SKIP_SUMMARY:-false}
       MAX_DOCUMENTS: ${MAX_DOCUMENTS:-0}
-    depends_on:
-      - qdrant
-    ports:
-      - "8001:8000"   # <— expose container 8000 on host 8001
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - my_network
 
   search-service:
     build: ./search_service
     container_name: search-service
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8012:8000"
     environment:
       # Hostname/IP and port of the Qdrant instance
       QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
       # API key for Google Gemini model used to embed incoming queries
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-    depends_on:
-      - qdrant
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - my_network
 
   streamlit-app:
     build: ./streamlit_app
@@ -85,9 +70,12 @@ services:
     environment:
       # URL of the search service
       SEARCH_API_URL: http://search-service:8000/search
-    depends_on:
-      - search-service
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - my_network
 
-volumes:
-  qdrant_data:
-    driver: local
+networks:
+  my_network:
+    external: true
+    name: my_services_my_network

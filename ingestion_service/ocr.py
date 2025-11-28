@@ -19,23 +19,28 @@ logger = logging.getLogger("ingestion.ocr")
 _OCR_REQUEST_GUARD = BoundedSemaphore(max(1, config.OCR_MAX_PARALLEL))
 
 
-def split_pdf_by_pages(pdf_bytes: bytes) -> List[bytes]:
-    """Split PDF bytes into single-page PDF byte blobs."""
+def split_pdf_by_pages(file_path: str) -> List[bytes]:
+    """Split PDF into single-page PDF byte blobs, reading from file."""
     try:
         from PyPDF2 import PdfReader, PdfWriter  # type: ignore
 
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        pages: List[bytes] = []
-        for index in range(len(reader.pages)):
-            writer = PdfWriter()
-            writer.add_page(reader.pages[index])
-            buffer = io.BytesIO()
-            writer.write(buffer)
-            pages.append(buffer.getvalue())
-        return pages or [pdf_bytes]
+        # Open file in binary mode
+        with open(file_path, "rb") as f:
+            reader = PdfReader(f)
+            pages: List[bytes] = []
+            for index in range(len(reader.pages)):
+                writer = PdfWriter()
+                writer.add_page(reader.pages[index])
+                buffer = io.BytesIO()
+                writer.write(buffer)
+                pages.append(buffer.getvalue())
+            return pages
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to split PDF into pages: %s. Falling back to full document.", exc)
-        return [pdf_bytes]
+        try:
+            return [Path(file_path).read_bytes()]
+        except Exception:
+            return []
 
 
 def _cache_file(cache_key: str) -> Path:
@@ -125,14 +130,18 @@ def _ocr_single_page(
     return page_index, ""
 
 
-def extract_text_via_ocr(pdf_bytes: bytes, filename: str) -> str:
+def extract_text_via_ocr(file_path: str, filename: str) -> str:
     """Run the external OCR service page-by-page with caching and concurrency guards."""
     if not config.OCR_SERVICE_URL:
         logger.warning("OCR_SERVICE_URL is not configured. Skipping OCR for %s.", filename)
         return ""
 
-    pages = split_pdf_by_pages(pdf_bytes)
+    pages = split_pdf_by_pages(file_path)
     total_pages = len(pages)
+    if total_pages == 0:
+        logger.warning("No pages extracted from %s", filename)
+        return ""
+
     logger.info("Submitting %s (%d pages) to OCR service at %s.", filename, total_pages, config.OCR_SERVICE_URL)
 
     if total_pages == 1:

@@ -92,8 +92,8 @@ The system consists of five main components:
 
 5. **Access the application**
    - Streamlit UI: http://localhost:8501
-   - Search API: http://localhost:8000
-   - Ingestion API: http://localhost:8001
+   - Search API: http://localhost:8012
+   - Ingestion API: http://localhost:8011
    - Qdrant UI: http://localhost:6333/dashboard
 
 ## 📝 Configuration
@@ -124,13 +124,13 @@ See `.env.example` for complete list of configuration options.
 Trigger immediate ingestion via API:
 
 ```bash
-curl -X POST http://localhost:8001/admin/ingest-now
+curl -X POST http://localhost:8011/admin/ingest-now
 ```
 
 ### Search via API
 
 ```bash
-curl "http://localhost:8000/search?query=laporan+keuangan&top_k=5"
+curl "http://localhost:8012/search?query=laporan+keuangan&top_k=5"
 ```
 
 ### Search via UI
@@ -242,3 +242,81 @@ Both collections use:
 - Collections need BM25 support (sparse vectors)
 - Ensure collections are created with sparse vector configuration
 - Check that `DOC_COLLECTION` and `CHUNK_COLLECTION` environment variables match your Qdrant collections
+## Deployment Guide (Rocky Linux)
+
+This guide details how to deploy the Document Search Stack from your local machine to a Rocky Linux server.
+
+### Prerequisites
+
+1.  **Server Access**: SSH access to your Rocky Linux server.
+2.  **Docker & Docker Compose**: Installed on the server.
+    ```bash
+    # Install Docker
+    sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    sudo dnf install docker-ce docker-ce-cli containerd.io
+    sudo systemctl start docker
+    sudo systemctl enable docker
+
+    # Install Docker Compose
+    sudo curl -L "https://github.com/docker/compose/releases/download/v2.29.1/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    ```
+3.  **Git**: Installed on the server (`sudo dnf install git`).
+
+### Deployment Steps
+
+1.  **Clone the Repository**
+    On your server, clone the project repository:
+    ```bash
+    git clone <your-repo-url> document_search_stack
+    cd document_search_stack
+    ```
+    *Alternatively, you can copy your local files using `scp`:*
+    ```bash
+    scp -r /path/to/local/project user@server_ip:/path/to/destination
+    ```
+
+2.  **Configure Environment Variables**
+    Create a `.env` file in the project root (you can copy `.env.example`):
+    ```bash
+    cp .env.example .env
+    nano .env
+    ```
+    **Crucial**: Update the following variables in `.env`:
+    *   `QDRANT_API_KEY`: Set to your Qdrant API key (e.g., `iniadalahapikeyqdrant`).
+    *   `QDRANT_HOST`: Set to `qdrant` (if using the external network setup below).
+    *   `GEMINI_API_KEY`: Your Google Gemini API key.
+    *   `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`: Microsoft Graph credentials.
+    *   `ONEDRIVE_DRIVE_ID`: Target OneDrive Drive ID.
+
+3.  **Setup External Network**
+    If you are connecting to an existing Qdrant instance running in another Docker stack (as per your configuration), ensure the external network exists.
+    
+    Check existing networks:
+    ```bash
+    docker network ls
+    ```
+    
+    If the network `my_services_my_network` does not exist (and your other stack hasn't created it yet), create it:
+    ```bash
+    docker network create my_services_my_network
+    ```
+    *Note: Ensure your existing Qdrant container is attached to this network.*
+
+4.  **Build and Run**
+    Start the services:
+    ```bash
+    docker-compose up -d --build
+    ```
+
+5.  **Verify Deployment**
+    *   **Streamlit UI**: Access `http://<server_ip>:8501`.
+    *   **Logs**: Check logs in the `./logs` directory on the server.
+        ```bash
+        tail -f logs/ingestion.log
+        tail -f logs/search.log
+        ```
+
+### Troubleshooting
+*   **Network Issues**: If services can't connect to Qdrant, ensure both stacks are on `my_services_my_network` and `QDRANT_HOST` matches the container name of your Qdrant instance.
+*   **Permissions**: Ensure the `./logs` directory is writable.

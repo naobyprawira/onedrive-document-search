@@ -17,10 +17,23 @@ from pydantic import BaseModel
 
 import config
 from embeddings import ensure_embeddings_ready, ensure_summarizer_ready
-from graph import download_file_bytes, get_graph_access_token, list_onedrive_recursive
-from pipeline import ProcessResult, process_document_from_file
+from graph import download_file_to_path, get_graph_access_token, list_onedrive_recursive
+from pipeline import ProcessResult, process_document_from_file, process_metadata_only_document
 from state_tracker import cleanup_completed, is_file_busy, set_file_state
 from storage import delete_document_and_chunks, ensure_collections, get_local_inventory
+
+
+def is_processable_with_ocr(mime_type: str) -> bool:
+    """Check if file type can be processed with OCR (PDF or image)."""
+    return mime_type in [
+        "application/pdf",
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/gif",
+        "image/bmp",
+        "image/tiff",
+    ]
 
 logger = logging.getLogger("ingestion")
 logging.basicConfig(level=logging.INFO)
@@ -51,11 +64,19 @@ def _start_worker_threads(worker_count: int, queue: Queue, dry_run: bool, result
             file_id = file_meta.get("id", "")
             file_name = file_meta.get("name", "unknown")
             try:
-                if not os.path.exists(temp_file_path):
-                    raise RuntimeError(f"Temp file not found: {temp_file_path}")
-
                 set_file_state(file_id, "processing", file_name)
-                result = process_document_from_file(file_meta, temp_file_path, dry_run=dry_run)
+                
+                # Check if this is metadata-only (no temp file)
+                if temp_file_path is None:
+                    # Process metadata-only (no download needed)
+                    from pipeline import process_metadata_only_document
+                    result = process_metadata_only_document(file_meta, dry_run=dry_run)
+                else:
+                    # Process with file content (PDF or image)
+                    if not os.path.exists(temp_file_path):
+                        raise RuntimeError(f"Temp file not found: {temp_file_path}")
+                    result = process_document_from_file(file_meta, temp_file_path, dry_run=dry_run)
+                
                 results.append(result)
                 
                 if result.success:
@@ -76,8 +97,8 @@ def _start_worker_threads(worker_count: int, queue: Queue, dry_run: bool, result
                     )
                 )
             finally:
-                # Clean up temp file after processing
-                if os.path.exists(temp_file_path):
+                # Clean up temp file after processing (if it exists)
+                if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.remove(temp_file_path)
                         logger.info("Cleaned up temp file: %s", temp_file_path)
@@ -183,10 +204,21 @@ def ingestion_job(dry_run: Optional[bool] = None) -> None:
     logger.info("Phase 1: Downloading %d files to temp directory...", len(to_process))
     temp_dir = tempfile.gettempdir()
     work_items: list[tuple[dict, str]] = []
+    metadata_only_items: list[dict] = []
 
     for file_meta in to_process:
         file_id = file_meta.get("id", "")
         file_name = file_meta.get("name", "document.pdf")
+        mime_type = file_meta.get("mimeType", "")
+        
+        # Check if this is a metadata-only file (no download needed)
+        if not is_processable_with_ocr(mime_type):
+            logger.info("Metadata-only file (no download): %s", file_name)
+            metadata_only_items.append(file_meta)
+            set_file_state(file_id, "enqueued", file_name)
+            continue
+        
+        # Download files that need OCR processing (PDFs and images)
         try:
             set_file_state(file_id, "downloading", file_name)
             download_url = file_meta.get("@microsoft.graph.downloadUrl") or file_meta.get("downloadUrl")
@@ -195,26 +227,58 @@ def ingestion_job(dry_run: Optional[bool] = None) -> None:
                 set_file_state(file_id, "failed", file_name)
                 continue
 
-            pdf_bytes = download_file_bytes(download_url)
             temp_file_path = os.path.join(temp_dir, f"{file_id}_{file_name}")
-            Path(temp_file_path).write_bytes(pdf_bytes)
+            download_file_to_path(download_url, temp_file_path)
             set_file_state(file_id, "enqueued", file_name)
             work_items.append((file_meta, temp_file_path))
-            logger.info("Downloaded %s (%d bytes) -> %s", file_name, len(pdf_bytes), temp_file_path)
+            logger.info("Downloaded %s -> %s", file_name, temp_file_path)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to download %s: %s", file_name, exc)
             set_file_state(file_id, "failed", file_name)
 
+    logger.info("Phase 1 complete. Downloaded %d files, %d metadata-only files.", 
+                len(work_items), len(metadata_only_items))
+
+    # Phase 2: Process metadata-only files (no download, no OCR)
+    logger.info("Phase 2: Processing %d metadata-only files...", len(metadata_only_items))
+    results: list[ProcessResult] = []
+    
+    for file_meta in metadata_only_items:
+        file_id = file_meta.get("id", "")
+        file_name = file_meta.get("name", "unknown")
+        try:
+            set_file_state(file_id, "processing", file_name)
+            result = process_metadata_only_document(file_meta, dry_run=dry_run)
+            results.append(result)
+            
+            if result.success:
+                set_file_state(file_id, "completed", file_name)
+            else:
+                set_file_state(file_id, "failed", file_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to process metadata-only %s: %s", file_name, exc)
+            set_file_state(file_id, "failed", file_name)
+            results.append(
+                ProcessResult(
+                    file_id=file_id or "",
+                    file_name=file_name,
+                    success=False,
+                    chunk_count=0,
+                    summary="",
+                    error=str(exc),
+                )
+            )
+    
     if not work_items:
-        logger.warning("No files were successfully downloaded.")
+        logger.info("No OCR files to process. Ingestion finished.")
+        success_count = sum(1 for result in results if result.success)
+        failure_count = len(results) - success_count
+        logger.info("Metadata-only processing complete. Success=%d Failures=%d", success_count, failure_count)
         return
 
-    logger.info("Phase 1 complete. Downloaded %d files.", len(work_items))
-
-    # Phase 2: Enqueue for worker processing
-    logger.info("Phase 2: Enqueueing %d files for processing...", len(work_items))
+    # Phase 3: Enqueue for worker processing (OCR files)
+    logger.info("Phase 3: Enqueueing %d OCR files for processing...", len(work_items))
     queue: Queue = Queue()
-    results: list[ProcessResult] = []
 
     worker_count = min(config.INGESTION_WORKERS, max(1, len(work_items)))
     threads = _start_worker_threads(worker_count, queue, dry_run, results)
@@ -243,9 +307,32 @@ def ingestion_job(dry_run: Optional[bool] = None) -> None:
         os._exit(0)
 
 
+# Configure logging to file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("/app/logs/ingestion.log")
+    ]
+)
+
+# Suppress verbose warnings from third-party libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("PyPDF2").setLevel(logging.ERROR)
+logging.getLogger("PyPDF2.generic._data_structures").setLevel(logging.ERROR)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
+app = FastAPI(title="Ingestion Service", version="2.0.0")
+scheduler = BackgroundScheduler()
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
-    cron_expr = config.SCHEDULE_CRON or "0 0 * * *"
+    # Ensure logs directory exists
+    os.makedirs("/app/logs", exist_ok=True)
+    
+    cron_expr = config.SCHEDULE_CRON or "0 */3 * * *"
     try:
         ensure_embeddings_ready()
     except Exception as exc:  # noqa: BLE001
@@ -267,6 +354,18 @@ async def startup_event() -> None:
             replace_existing=True,
         )
         logger.info("Scheduler started with cron %s", cron_expr)
+        
+        # Trigger immediate run in background
+        from datetime import datetime, timedelta
+        scheduler.add_job(
+            ingestion_job,
+            trigger="date",
+            run_date=datetime.now() + timedelta(seconds=10),
+            id="ingest_immediate_startup",
+            replace_existing=True,
+        )
+        logger.info("Scheduled immediate ingestion run (in 10s).")
+        
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to start scheduler: %s", exc)
 

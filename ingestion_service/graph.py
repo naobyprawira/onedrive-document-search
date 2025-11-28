@@ -49,7 +49,7 @@ def _graph_get(url: str, token: str, params: dict | None = None) -> dict:
     """Perform a GET request with simple retry handling for 429 codes."""
     headers = {"Authorization": f"Bearer {token}"}
     for attempt in range(5):
-        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response = requests.get(url, headers=headers, params=params, timeout=500)
         if response.status_code == 429:
             wait_seconds = int(response.headers.get("Retry-After", "2"))
             logger.warning("Graph 429 on %s. Waiting %s seconds before retry.", url, wait_seconds)
@@ -94,10 +94,9 @@ def list_onedrive_recursive(token: str, drive_id: str, root_path: str) -> List[d
                     stack.append((item_id, child_path))
                     continue
 
+                # Include all file types, not just PDFs
                 mime_type = item.get("file", {}).get("mimeType") if item.get("file") else None
-                if mime_type != "application/pdf":
-                    continue
-
+                
                 results.append(
                     {
                         "id": item_id,
@@ -116,9 +115,11 @@ def list_onedrive_recursive(token: str, drive_id: str, root_path: str) -> List[d
     return results
 
 
-def download_file_bytes(download_url: str) -> bytes:
-    """Download raw bytes via the Graph-provided download URL."""
-    response = requests.get(download_url, timeout=300)
-    response.raise_for_status()
-    return response.content
+def download_file_to_path(download_url: str, target_path: str) -> None:
+    """Download file to target path using streaming to avoid loading into memory."""
+    with requests.get(download_url, stream=True, timeout=300) as response:
+        response.raise_for_status()
+        with open(target_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
 
