@@ -55,19 +55,14 @@ logging.basicConfig(
     ]
 )
 
-if QDRANT_URL:
-    logger.info("Connecting to Qdrant Cloud at %s", QDRANT_URL)
-    qdrant_client = QdrantClient(
-        url=QDRANT_URL,
-        api_key=QDRANT_API_KEY or None
-    )
-else:
-    logger.info("Connecting to Qdrant at %s:%s", QDRANT_HOST, QDRANT_PORT)
-    qdrant_client = QdrantClient(
-        host=QDRANT_HOST, 
-        port=QDRANT_PORT,
-        api_key=QDRANT_API_KEY or None
-    )
+if not QDRANT_URL:
+    raise ValueError("QDRANT_URL is not set. Please configure it for Qdrant Cloud.")
+
+logger.info("Connecting to Qdrant Cloud at %s", QDRANT_URL)
+qdrant_client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY or None
+)
 app = FastAPI(title="Search Service", version="2.0.0")
 
 @app.on_event("startup")

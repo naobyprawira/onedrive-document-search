@@ -8,9 +8,7 @@ services:
     ports:
       - "8011:8000"
     environment:
-      # Hostname/IP and port of the Qdrant instance
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
+      # Qdrant Cloud Configuration
       QDRANT_URL: ${QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       # API key for Google Gemini models used for summarisation and embedding
@@ -51,9 +49,7 @@ services:
     ports:
       - "8012:8000"
     environment:
-      # Hostname/IP and port of the Qdrant instance
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
+      # Qdrant Cloud Configuration
       QDRANT_URL: ${QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       # API key for Google Gemini model used to embed incoming queries
