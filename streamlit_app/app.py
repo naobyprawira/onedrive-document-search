@@ -25,14 +25,18 @@ st.set_page_config(
     layout="wide",
 )
 
-# Logo
-try:
-    st.image("logo.png", width=200)
-except Exception:
-    logger.warning("Logo file 'logo.png' not found.")
-    st.title("🔍 Document Search")
+# Logo and Title
+col1, col2 = st.columns([1, 6])
+with col1:
+    try:
+        st.image("logo.png", width=80)
+    except Exception:
+        st.write("🔍")
+with col2:
+    st.title("Accounting Document Search")
 
-# Authentication
+# Removed description to directly show search input
+
 # Authentication
 APP_ACCESS_KEY = os.getenv("APP_ACCESS_KEY", "").strip()
 
@@ -54,7 +58,6 @@ if APP_ACCESS_KEY and not st.session_state.authenticated:
     login_dialog()
     st.stop()
 
-st.markdown("Search through accounting documents using semantic search powered by vector embeddings.")
 
 # Defaults
 DEFAULT_TOP_K = 50
@@ -64,9 +67,9 @@ PAGINATION_STEP = 5
 
 # Search input
 query = st.text_input(
-    "Enter your search query:",
+    "Search",
     placeholder="e.g., perjanjian kredit, laporan keuangan, perpajakan...",
-    help="Enter keywords or questions in Indonesian or English",
+    label_visibility="collapsed"
 )
 
 # Initialize display count for pagination
@@ -81,7 +84,7 @@ if query != st.session_state.last_query:
     st.session_state.display_count = INITIAL_DISPLAY_COUNT
     st.session_state.last_query = query
 
-if st.button("🔍 Search", type="primary", use_container_width=True) or query:
+if st.button("Search", type="primary", use_container_width=True) or query:
     if not query.strip():
         st.warning("Please enter a search query.")
     else:
