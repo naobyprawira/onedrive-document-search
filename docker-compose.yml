@@ -1,74 +1,43 @@
-version: '3.8'
-
 services:
-  ingestion-service:
-    build: ./ingestion_service
-    container_name: ingestion-service
+  accounting-search:
+    build: .
+    container_name: accounting-search
     restart: unless-stopped
     ports:
-      - "8011:8000"
+      - "8011:8011"
+      - "8012:8012"
+      - "8503:8503"
     environment:
       # Qdrant Cloud Configuration
       QDRANT_URL: ${QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY}
-      # API key for Google Gemini models used for summarisation and embedding
+      # API key for Google Gemini models
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       EMBED_DIM: ${EMBED_DIM:-3072}
-      # Summary model provider (GEMINI or OPENROUTER)
+      # Summary model provider
       SUMMARY_PROVIDER: ${SUMMARY_PROVIDER:-GEMINI}
-      # OpenRouter API key (required if SUMMARY_PROVIDER=OPENROUTER)
+      # OpenRouter API key
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
-      # Azure AD credentials for Microsoft Graph.
+      # Azure AD credentials
       MS_TENANT_ID: ${MS_TENANT_ID}
       MS_CLIENT_ID: ${MS_CLIENT_ID}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
-      # Optionally restrict to a specific drive/folder
+      # OneDrive
       ONEDRIVE_DRIVE_ID: ${ONEDRIVE_DRIVE_ID}
       ONEDRIVE_ROOT_PATH: ${ONEDRIVE_ROOT_PATH}
-      # CRON expression for how often to sync OneDrive
       SCHEDULE_CRON: ${SCHEDULE_CRON}
-      # OCR service endpoint for PDF text extraction
+      # OCR
       OCR_SERVICE_URL: ${OCR_SERVICE_URL}
-      # Chunking parameters (character-based)
+      # Chunking
       CHUNK_SIZE: ${CHUNK_SIZE:-2000}
       CHUNK_OVERLAP: ${CHUNK_OVERLAP:-200}
       # Operational flags
       DRY_RUN: ${DRY_RUN:-false}
       SKIP_SUMMARY: ${SKIP_SUMMARY:-false}
       MAX_DOCUMENTS: ${MAX_DOCUMENTS:-0}
-    volumes:
-      - ./logs:/app/logs
-    networks:
-      - my_network
-
-  search-service:
-    build: ./search_service
-    container_name: search-service
-    restart: unless-stopped
-    ports:
-      - "8012:8000"
-    environment:
-      # Qdrant Cloud Configuration
-      QDRANT_URL: ${QDRANT_URL}
-      QDRANT_API_KEY: ${QDRANT_API_KEY}
-      # API key for Google Gemini model used to embed incoming queries
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-    volumes:
-      - ./logs:/app/logs
-    networks:
-      - my_network
-
-  streamlit-app:
-    build: ./streamlit_app
-    container_name: streamlit-app
-    restart: unless-stopped
-    ports:
-      - "8501:8501"
-    environment:
-      # URL of the search service
-      SEARCH_API_URL: http://search-service:8000/search
-      # Optional: Access key for the app
+      # Streamlit
+      SEARCH_API_URL: http://localhost:8012/search
       APP_ACCESS_KEY: ${APP_ACCESS_KEY}
     volumes:
       - ./logs:/app/logs

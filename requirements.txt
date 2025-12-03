@@ -1,3 +1,13 @@
+fastapi
+uvicorn
+apscheduler
 qdrant-client
-fastembed
+google-genai
+requests
 python-dotenv
+PyPDF2
+openai
+fastembed
+tqdm
+patool
+streamlit

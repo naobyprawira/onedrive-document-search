@@ -35,8 +35,17 @@ def is_processable_with_ocr(mime_type: str) -> bool:
         "image/tiff",
     ]
 
+# Configure logging to file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("/app/logs/ingestion.log")
+    ]
+)
+
 logger = logging.getLogger("ingestion")
-logging.basicConfig(level=logging.INFO)
 
 # Suppress verbose warnings from third-party libraries
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -330,21 +339,7 @@ def ingestion_job(dry_run: Optional[bool] = None) -> None:
         os._exit(0)
 
 
-# Configure logging to file and console
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("/app/logs/ingestion.log")
-    ]
-)
 
-# Suppress verbose warnings from third-party libraries
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("PyPDF2").setLevel(logging.ERROR)
-logging.getLogger("PyPDF2.generic._data_structures").setLevel(logging.ERROR)
-logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 app = FastAPI(title="Ingestion Service", version="2.0.0")
 scheduler = BackgroundScheduler()

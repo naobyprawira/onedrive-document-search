@@ -83,6 +83,9 @@ def _ocr_single_page(
     total_pages: int,
     filename: str,
 ) -> Tuple[int, str]:
+    import mimetypes
+    import os
+
     cache_key = f"{bytes_sha256(page_bytes)}_{page_index}"
 
     cached = load_cached_page(cache_key)
@@ -90,14 +93,28 @@ def _ocr_single_page(
         logger.info("OCR cache hit %s page %d/%d", filename, page_index + 1, total_pages)
         return page_index, cached
 
-    files = {"file": (f"{filename}_p{page_index + 1}.pdf", page_bytes, "application/pdf")}
+    # Determine mime type and extension
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        mime_type = "application/pdf"  # Default to PDF
+    
+    # If it's a PDF, the split pages are also PDFs
+    if filename.lower().endswith(".pdf"):
+        mime_type = "application/pdf"
+        ext = ".pdf"
+    else:
+        ext = os.path.splitext(filename)[1]
+
+    upload_name = f"{filename}_p{page_index + 1}{ext}"
+
+    files = {"file": (upload_name, page_bytes, mime_type)}
     retries = 3
     backoff = 3
 
     for attempt in range(1, retries + 1):
         try:
             with _OCR_REQUEST_GUARD:
-                logger.debug("Sending OCR request to %s with file: %s (%d bytes)", config.OCR_SERVICE_URL, f"{filename}_p{page_index + 1}.pdf", len(page_bytes))
+                logger.debug("Sending OCR request to %s with file: %s (%d bytes)", config.OCR_SERVICE_URL, upload_name, len(page_bytes))
                 response = requests.post(config.OCR_SERVICE_URL, files=files, timeout=300)
             response.raise_for_status()
             payload = response.json()
